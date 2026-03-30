@@ -171,15 +171,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (type === 'percentuale') {
             unit.textContent = '%';
-            inp.max = 20; inp.step = 0.1;
+            inp.max = 20; inp.step = 0.1; inp.min = 0;
             if (parseFloat(inp.value) > 20) inp.value = 4;
             sld.max = 15; sld.step = 0.1;
             sld.value = inp.value;
             note.style.display = 'block';
         } else {
             unit.textContent = '€';
-            inp.max = 100000; inp.step = 100;
-            if (parseFloat(inp.value) <= 15) inp.value = 2000;
+            inp.max = 500000; inp.step = 100; inp.min = 0;
+            if (parseFloat(inp.value) <= 20) inp.value = 2000;
             sld.max = 30000; sld.step = 100;
             sld.value = Math.min(parseFloat(inp.value) || 0, 30000);
             note.style.display = 'none';
@@ -293,7 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateUI() {
         const d = state.dati;
         elements.results.cap0.textContent = formatCurrency(d.cap0);
-        elements.results.tasso.textContent = d.withdrawalRate.toFixed(2) + '%';
+        elements.results.tasso.textContent = d.withdrawalRate.toFixed(1) + '%';
         elements.results.durata.innerHTML = d.depletionMonth > 0 ? 
             `${d.actualDuration.toFixed(1)} anni 🔴` : 
             `${d.years} anni+ ✅`;
@@ -304,20 +304,22 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.results.totCosti.textContent = formatCurrency(d.costImpact);
         elements.results.erosione.textContent = formatCurrency(d.inflationErosion);
 
-        // Status "Semaforo" logic
+        // Status "Semaforo" logic (FIX#7: consider fragility)
         const sem = elements.ui.semaforo;
         const txt = elements.ui.semText;
+        const margin = d.capFinalNom / d.cap0;
+        const t6 = d.withdrawalRate <= 6;
         sem.className = 'semaforo';
 
         if (d.depletionMonth > 0) {
             sem.classList.add('sem-r');
-            txt.innerHTML = `<strong>Attenzione: Piano non sostenibile.</strong> Il patrimonio si esaurisce dopo ${d.actualDuration.toFixed(1)} anni. Riduci i prelievi o aumenta i versamenti.`;
-        } else if (d.withdrawalRate > 5 || (d.capFinalNom / d.cap0) < 0.2) {
+            txt.innerHTML = `<strong>Piano non sostenibile.</strong> Il patrimonio si esaurisce dopo circa ${d.actualDuration.toFixed(1)} anni. Riduci i prelievi o aumenta i versamenti.`;
+        } else if (margin < 0.15 || !t6) {
             sem.classList.add('sem-g');
             txt.innerHTML = `<strong>Piano fragile.</strong> Il patrimonio regge ma con margini ridotti o un tasso di prelievo elevato (${d.withdrawalRate.toFixed(1)}%). Considera una riserva di sicurezza.`;
         } else {
             sem.classList.add('sem-v');
-            txt.innerHTML = `<strong>Piano sostenibile.</strong> Il patrimonio è solido e supporta l'intero orizzonte con un residuo reale di ${formatCurrency(d.capFinalReal)}.`;
+            txt.innerHTML = `<strong>Piano sostenibile.</strong> Il patrimonio è solido e supporta l'intero orizzonte con un residuo reale di ${formatCurrency(d.capFinalReal)}. Tasso prelievo: ${d.withdrawalRate.toFixed(1)}%.`;
         }
     }
 
@@ -413,8 +415,8 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let i = 1; i < currentSeries.length; i++) ctx.lineTo(xPos(i), yPos(currentSeries[i]));
         ctx.stroke();
 
-        // Depletion Line
-        if (d.depletionMonth > 0) {
+        // Depletion Line (FIX#4)
+        if (d.depletionMonth > 0 && d.actualDuration <= d.years) {
             const dx = xPos(d.actualDuration);
             ctx.beginPath();
             ctx.strokeStyle = '#e05a5a';
@@ -425,7 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.setLineDash([]);
             ctx.fillStyle = '#e05a5a';
             ctx.font = 'bold 10px Inter';
-            ctx.fillText('Esaurito', dx, pad.t - 15);
+            ctx.fillText(`Esaurito a ${d.actualDuration.toFixed(1)}a`, dx, pad.t - 15);
         }
     }
 
@@ -464,22 +466,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         items.forEach((it, i) => {
             const x = pad.l + gap * i + gap / 2;
-            const bh = (it.val / maxVal) * cH;
+            const bh = Math.max(0, (it.val / maxVal) * cH); // FIX#6: handle zeroes
             const y = pad.t + cH - bh;
 
             // Bar Shadow/Glow
-            ctx.fillStyle = it.color + '22';
-            ctx.fillRect(x - barW / 2, y, barW, bh);
-            
-            // Bar Cap
-            ctx.fillStyle = it.color;
-            ctx.fillRect(x - barW / 2, y, barW, 4);
+            if (bh > 0) {
+                ctx.fillStyle = it.color + '22';
+                ctx.fillRect(x - barW / 2, y, barW, bh);
+                
+                // Bar Cap
+                ctx.fillStyle = it.color;
+                ctx.fillRect(x - barW / 2, y, barW, 4);
+            }
 
             // Label Val
             ctx.fillStyle = it.color;
             ctx.font = 'bold 11px Inter';
             ctx.textAlign = 'center';
-            ctx.fillText(formatCurrency(it.val), x, y - 8);
+            ctx.fillText(formatCurrency(it.val), x, Math.max(pad.t + 12, y - 8));
 
             // Label X
             ctx.fillStyle = '#4a5a80';
@@ -527,7 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.setAttribute('download', 'simulazione_decumulo.csv');
+        link.setAttribute('download', 'decumulo_rdo.csv');
         link.click();
     }
 
